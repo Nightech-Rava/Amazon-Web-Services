@@ -1,0 +1,535 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: >-
+  AWS CloudFormation Template
+  OC Project
+  Public Stack
+
+
+##########
+########## PARAMETERS
+##########
+
+
+Parameters:
+  DBName:
+    Default: wordpress
+    Description: The database name
+    Type: String
+    MinLength: '1'
+    MaxLength: '64'
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+    ConstraintDescription: must begin with a letter and contain only alphanumeric characters.
+  DBUser:
+    Default: wordpress
+    Description: The database admin account username
+    Type: String
+    MinLength: '1'
+    MaxLength: '16'
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+    ConstraintDescription: must begin with a letter and contain only alphanumeric characters.
+  DBPassword:
+    Default: wordpress
+    Description: The database admin account password
+    Type: String
+    MinLength: '1'
+    MaxLength: '41'
+    AllowedPattern: '[a-zA-Z0-9]+'
+    ConstraintDescription: must contain only alphanumeric characters.
+  DBAllocatedStorage:
+    Default: '5'
+    Description: The size of the database (Gb)
+    Type: Number
+    MinValue: '5'
+    MaxValue: '1024'
+    ConstraintDescription: must be between 5 and 1024Gb.
+  DBInstanceClass:
+    Description: The database instance type
+    Type: String
+    Default: db.t2.micro
+    ConstraintDescription: must select a valid database instance type.
+  S3User:
+    Default: wordpress
+    Description: The storage admin account username
+    Type: String
+    MinLength: '1'
+    MaxLength: '16'
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+    ConstraintDescription: must begin with a letter and contain only alphanumeric characters.
+  S3Password:
+    Default: WordPress789
+    Description: The storage admin account password
+    Type: String
+    MinLength: '1'
+    MaxLength: '41'
+    AllowedPattern: '[a-zA-Z0-9]+'
+    ConstraintDescription: must contain only alphanumeric characters.
+  MultiAZ:
+    Description: Multi-AZ master database
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    ConstraintDescription: must be true or false.
+  Email:
+    Type: String
+    Default: "secret@gmail.com" 
+
+
+##########
+########## RESOURCES
+##########
+
+
+Resources:
+  #####
+  ##### VPC & Gateway
+  #####
+  MyVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: "10.0.0.0/16"
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: 'Name'
+          Value: 'MyVPC'
+  MyInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: 'Name'
+          Value: 'MyInternetGateway'
+  MyVPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref MyInternetGateway
+      VpcId: !Ref MyVPC
+  #####
+  ##### 'A' Network
+  #####
+  MyRouteTableA:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      Tags:
+        - Key: 'Name'
+          Value: 'MyRouteTableA'
+      VpcId: !Ref MyVPC
+  MySubnetRouteTableAssociationA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref MyRouteTableA
+      SubnetId: !Ref MyPublicSubnetA
+  MyRouteA:
+    Type: AWS::EC2::Route
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref MyInternetGateway
+      RouteTableId: !Ref MyRouteTableA
+  MyPublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: eu-west-3a
+      CidrBlock: 10.0.1.0/24
+      Tags:
+        - Key: 'Name'
+          Value: 'MyPublicSubnetA'
+      VpcId: !Ref MyVPC
+  MyPrivateSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: eu-west-3a
+      CidrBlock: 10.0.2.0/24
+      Tags:
+        - Key: 'Name'
+          Value: 'MyPrivateSubnetA'
+      VpcId: !Ref MyVPC
+  #####
+  ##### 'B' Network
+  #####
+  MyRouteTableB:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      Tags:
+        - Key: 'Name'
+          Value: 'MyRouteTableB'
+      VpcId: !Ref MyVPC
+  MySubnetRouteTableAssociationB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref MyRouteTableB
+      SubnetId: !Ref MyPublicSubnetB
+  MyRouteB:
+    Type: AWS::EC2::Route
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref MyInternetGateway
+      RouteTableId: !Ref MyRouteTableB
+  MyPublicSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: eu-west-3b
+      CidrBlock: 10.0.3.0/24
+      Tags:
+        - Key: 'Name'
+          Value: 'MyPublicSubnetB'
+      VpcId: !Ref MyVPC
+  MyPrivateSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: eu-west-3b
+      CidrBlock: 10.0.4.0/24
+      Tags:
+        - Key: 'Name'
+          Value: 'MyPrivateSubnetB'
+      VpcId: !Ref MyVPC
+
+
+  #####
+  ##### 'DB' Network Group
+  #####
+  MyDBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Database subnet group
+      DBSubnetGroupName: DBSubnetGroup
+      SubnetIds:
+        - !Ref MyPrivateSubnetA
+        - !Ref MyPrivateSubnetB
+  #####
+  ##### 'DB' Master
+  #####
+  MyMasterDB:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBName: !Ref 'DBName'
+      DBSubnetGroupName: !Ref MyDBSubnetGroup
+      AllocatedStorage: !Ref 'DBAllocatedStorage'
+      DBInstanceClass: !Ref 'DBInstanceClass'
+      Engine: MySQL
+      MasterUsername: !Ref 'DBUser'
+      MasterUserPassword: !Ref 'DBPassword'
+      MultiAZ: !Ref 'MultiAZ'
+      AvailabilityZone: !GetAtt MyPrivateSubnetA.AvailabilityZone
+      Tags:
+      - Key: Name
+        Value: Master Database
+      VPCSecurityGroups: 
+      - !Ref MyEC2SecurityGroup
+    DeletionPolicy: Snapshot
+  #####
+  ##### 'DB' Replica
+  #####
+  MyReplicaDB:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      SourceDBInstanceIdentifier: !Ref MyMasterDB
+      DBInstanceClass: !Ref 'DBInstanceClass'
+      MultiAZ: !Ref 'MultiAZ'     
+      AvailabilityZone: !GetAtt MyPrivateSubnetB.AvailabilityZone
+      Tags:
+      - Key: Name
+        Value: Read Replica Database
+      VPCSecurityGroups: 
+      - !Ref MyEC2SecurityGroup
+
+
+  #####
+  ##### 'S3' Bucket
+  #####
+  MyS3Bucket:
+    Type: 'AWS::S3::Bucket'
+    DeletionPolicy: Delete
+    Properties:
+      BucketName: wp-media-files-access
+      AccessControl: Private
+      PublicAccessBlockConfiguration:     
+        RestrictPublicBuckets: yes
+  MyS3BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      PolicyDocument:
+        Statement:
+        - Effect: Allow
+          Action: "*"
+          Principal:
+            AWS: "*"            
+          Resource:
+            - "arn:aws:s3:::wp-media-files-access"
+            - "arn:aws:s3:::wp-media-files-access/*"             
+      Bucket: wp-media-files-access
+  #####
+  ##### 'S3' Access
+  #####
+  MyIAMUser:
+    Type: AWS::IAM::User
+    Properties: 
+      LoginProfile: 
+        Password: !Ref S3Password
+      UserName: !Ref S3User
+  MyIAMManagedPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+        - Effect: Allow
+          Action:
+            - "s3:GetBucketLocation"
+            - "s3:CreateBucket"
+            - "s3:DeleteObject"
+            - "s3:Put*"
+            - "s3:Get*"
+            - "s3:List*"      
+          Resource: 
+            - "arn:aws:s3:::wp-media-files-access"
+            - "arn:aws:s3:::wp-media-files-access/*"
+  MyIAMAccessKey:
+    Type: AWS::IAM::AccessKey
+    Properties:
+      UserName:
+        !Ref MyIAMUser
+
+
+  #####
+  ##### 'EC2' Security Group
+  #####
+  MyEC2SecurityGroup:
+    Type:  AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: EC2 security group
+      SecurityGroupEgress: 
+        - IpProtocol:  -1
+          CidrIp:  0.0.0.0/0
+      SecurityGroupIngress:
+        - IpProtocol: icmp
+          FromPort: '8'
+          ToPort: '-1'
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          CidrIp: 0.0.0.0/0
+      VpcId: !Ref MyVPC
+
+
+  #####
+  ##### 'EC2' Launch Configuration
+  #####
+  MyEC2LaunchConfiguration:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    DependsOn:
+      - MyMasterDB
+      - MyS3Bucket
+    Properties: 
+      AssociatePublicIpAddress: true
+      InstanceType: t2.micro
+      ImageId: ami-0d3c032f5934e1b41
+      KeyName: MyKey
+      SecurityGroups:
+        - !Ref MyEC2SecurityGroup
+      UserData:
+        "Fn::Base64":
+          !Sub |
+            #!/bin/bash
+            
+            #####
+            ##### Variables List
+            #####
+            export DB_HOST=${MyMasterDB.Endpoint.Address}
+            export DB_PORT=${MyMasterDB.Endpoint.Port}
+            export LB_DNS=${MyLoadBalancer.DNSName}
+            export A_KEY=${MyIAMAccessKey}
+            export S_KEY=${MyIAMAccessKey.SecretAccessKey}
+            #####
+            ##### Installations List
+            #####
+            sudo yum update && yum upgrade -y
+            sudo amazon-linux-extras install docker
+            sudo yum install docker -y
+            sudo curl -L "https://github.com/docker/compose/releases/download/1.29.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+            sudo chmod +x /usr/local/bin/docker-compose
+            sudo usermod -a -G docker ec2-user
+            sudo service docker start
+            sudo yum install mysql -y
+            sudo docker run -d -p 80:80 --name=MyWordPress -e WORDPRESS_DB_HOST=$DB_HOST:$DB_PORT -e WORDPRESS_DB_USER=wordpress -e WORDPRESS_DB_PASSWORD=wordpress -e WORDPRESS_DB_NAME=wordpress wordpress:latest
+            #####
+            ##### Container Configuration
+            #####
+            sudo docker exec MyWordPress curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
+            sudo docker exec MyWordPress chmod +x wp-cli.phar
+            sudo docker exec MyWordPress mv wp-cli.phar /usr/local/bin/wp
+            sudo docker exec MyWordPress wp core install --url=$LB_DNS --title=CamCam-WP --admin_user=wordpress --admin_password=wordpress --admin_email=camille.gaschet1984@gmail.com --allow-root
+            sudo docker exec MyWordPress wp plugin install amazon-s3-and-cloudfront --allow-root
+            sudo docker exec MyWordPress wp plugin activate amazon-s3-and-cloudfront --allow-root
+            sudo docker exec MyWordPress sed -i "126idefine( 'AS3CF_SETTINGS', serialize( array('provider' => 'aws', 'access-key-id' => '$A_KEY', 'secret-access-key' => '$S_KEY') ) );" wp-config.php
+            sudo docker exec MyWordPress chmod 755 wp-config.php
+            sudo docker exec MyWordPress service apache2 reload
+            #####
+            ##### 'CPU' Stress
+            #####
+            sudo amazon-linux-extras install epel -y
+            sudo yum install stress -y
+
+
+  #####
+  ##### Auto Scaler
+  #####
+  MyNotificationTopic:
+    Type: 'AWS::SNS::Topic'
+    Properties:
+      Subscription:
+        - Endpoint: !Ref Email
+          Protocol: email
+  MyAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      LaunchConfigurationName: !Ref MyEC2LaunchConfiguration
+      AvailabilityZones:
+        - Fn::Select:
+          - 0
+          - Fn::GetAZs: !Ref AWS::Region
+        - Fn::Select:
+          - 1
+          - Fn::GetAZs: !Ref AWS::Region
+      VPCZoneIdentifier:
+        - !Ref MyPublicSubnetA
+        - !Ref MyPublicSubnetB
+      DesiredCapacity: 2
+      MinSize: 2
+      MaxSize: 4
+      TargetGroupARNs:
+        - !Ref MyLoadBalancerTargetGroup
+      NotificationConfigurations:
+        - TopicARN:
+            Ref: MyNotificationTopic
+          NotificationTypes:
+            - autoscaling:EC2_INSTANCE_LAUNCH
+            - autoscaling:EC2_INSTANCE_LAUNCH_ERROR
+            - autoscaling:EC2_INSTANCE_TERMINATE
+            - autoscaling:EC2_INSTANCE_TERMINATE_ERROR
+      Tags:
+        - Key: Name
+          Value: AutoScalingInstances
+          PropagateAtLaunch: 'true'
+  #####
+  ##### Scale Up & Scale Down
+  #####
+  MyAutoScalingUp:
+    Type:  AWS::AutoScaling::ScalingPolicy
+    DependsOn: MyAutoScalingGroup
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName: !Ref MyAutoScalingGroup
+      Cooldown: 60
+      ScalingAdjustment: 1 
+  MyAutoScalingDown:
+    Type: AWS::AutoScaling::ScalingPolicy
+    DependsOn: MyAutoScalingGroup
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName: !Ref MyAutoScalingGroup
+      Cooldown: 60
+      ScalingAdjustment: -1
+  #####
+  ##### 'CPU' Alarm
+  #####
+  MyCPUAlarmHigh:
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmDescription: Scale-up if CPU > 80% for 5 minutes
+      MetricName: CPUUtilization
+      Namespace: AWS/EC2
+      Statistic: Average
+      Period: '60'
+      EvaluationPeriods: '1'
+      Threshold: '80'
+      AlarmActions:
+        - !Ref MyAutoScalingUp
+        - !Ref MyNotificationTopic
+      Dimensions:
+        - Name: AutoScalingGroupName
+          Value: !Ref MyAutoScalingGroup
+      ComparisonOperator: GreaterThanThreshold
+  MyCPUAlarmLow:
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmDescription: Scale-down if CPU < 80% for 5 minutes
+      MetricName: CPUUtilization
+      Namespace: AWS/EC2
+      Statistic: Average
+      Period: '60'
+      EvaluationPeriods: '1'
+      Threshold: '80'
+      AlarmActions:
+        - !Ref MyAutoScalingDown
+        - !Ref MyNotificationTopic
+      Dimensions:
+        - Name: AutoScalingGroupName
+          Value: !Ref MyAutoScalingGroup
+      ComparisonOperator: LessThanThreshold
+
+
+  #####
+  ##### Load Balancer
+  #####
+  MyLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      IpAddressType: ipv4
+      Name: loadbalancer
+      Scheme: internet-facing
+      SecurityGroups:
+        - !Ref MyEC2SecurityGroup
+      Type: application
+      Subnets:
+        - !Ref MyPublicSubnetA
+        - !Ref MyPublicSubnetB
+  MyLoadBalancerTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:   
+      Port: 80
+      Protocol: HTTP    
+      VpcId: !Ref MyVPC
+      TargetGroupAttributes:
+        - Key: stickiness.enabled
+          Value: true
+        - Key: stickiness.type
+          Value: lb_cookie
+        - Key: stickiness.lb_cookie.duration_seconds
+          Value: 86400
+      Tags:
+        - Key: 'Name'
+          Value: 'MyLoadBalancerTargetGroup'
+  MyLoadBalancerListener:
+    Type: "AWS::ElasticLoadBalancingV2::Listener"
+    Properties:
+      DefaultActions:
+        - TargetGroupArn: !Ref MyLoadBalancerTargetGroup
+          Type: forward
+      LoadBalancerArn: !Ref MyLoadBalancer
+      Port: 80
+      Protocol: HTTP
+
+
+##########
+########## OUTPUTS
+##########
+
+
+Outputs:
+  MyLoadBalancer:
+    Description: A reference to the Application Load Balancer
+    Value: !Ref MyLoadBalancer
+  MyLoadBalancerUrl:
+    Description: The URL of the ALB
+    Value: !GetAtt MyLoadBalancer.DNSName
+  MyLoadBalancerListener:
+    Description: A reference to a port 80 listener
+    Value: !Ref MyLoadBalancerListener
