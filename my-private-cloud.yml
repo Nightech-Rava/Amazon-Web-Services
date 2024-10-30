@@ -1,0 +1,360 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: >-
+  AWS CloudFormation Template
+  OC Project
+  Private Stack
+
+
+##########
+########## PARAMETERS
+##########
+
+
+Parameters:
+  VPCCIDR:
+    Type: String
+    Description: IP Address range for the VPN connected VPC
+    MinLength: '9'
+    MaxLength: '18'
+    Default: 10.0.0.0/16
+    AllowedPattern: '(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})'
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
+  SubnetCIDR:
+    Type: String
+    Description: IP Address range for the VPN connected Subnet
+    MinLength: '9'
+    MaxLength: '18'
+    Default: 10.0.5.0/24
+    AllowedPattern: '(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})'
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
+
+
+##########
+########## RESOURCES
+##########
+
+
+Resources: 
+  #####
+  ##### VPC & Gateway
+  #####
+  MyVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VPCCIDR
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: 'Name'
+          Value: 'MyVPC'
+  MyInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: 'Name'
+          Value: 'MyInternetGateway'
+  MyVPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref MyInternetGateway
+      VpcId: !Ref MyVPC
+  #####
+  ##### Network Interfaces
+  ##### 
+  MyEIPVPN:
+    Type: AWS::EC2::EIP
+    Properties:
+      Tags:
+        - Key: 'Name'
+          Value: 'MyEIPVPN'
+  MyEIPAssociationVPN:
+    Type: AWS::EC2::EIPAssociation
+    Properties: 
+      AllocationId: !GetAtt MyEIPVPN.AllocationId
+      NetworkInterfaceId: !Ref MyNetworkInterfaceVPN
+  MyNetworkInterfaceVPN:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      Description: VPN network interface
+      SubnetId: !Ref MyPrivateSubnetC
+      GroupSet:
+        - !Ref MyVPNSecurityGroup
+  MyEIPIntranet:
+    Type: AWS::EC2::EIP
+    Properties:
+      Tags:
+        - Key: 'Name'
+          Value: 'MyEIPIntranet'
+  MyEIPAssociationIntranet:
+    Type: AWS::EC2::EIPAssociation
+    Properties: 
+      AllocationId: !GetAtt MyEIPIntranet.AllocationId
+      NetworkInterfaceId: !Ref MyNetworkInterfaceIntranet
+  MyNetworkInterfaceIntranet:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      Description: Intranet network interface
+      SubnetId: !Ref MyPrivateSubnetC
+      GroupSet:
+        - !Ref MyIntranetSecurityGroup
+  #####
+  ##### 'C' Network
+  ##### 
+  MyPrivateSubnetC:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: eu-west-3c
+      CidrBlock: !Ref SubnetCIDR
+      Tags:
+        - Key: Name
+          Value: 'MyPrivateSubnetC'
+      VpcId: !Ref MyVPC
+  MyPrivateRouteTableC:
+    Type: AWS::EC2::RouteTable
+    Properties: 
+      VpcId: !Ref MyVPC
+      Tags:
+        - Key: Name
+          Value: 'MyPrivateRouteTableC'
+  MySubnetRouteTableAssociationC:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref MyPrivateRouteTableC
+      SubnetId: !Ref MyPrivateSubnetC
+  MyPrivateRouteC:
+    Type: AWS::EC2::Route
+    Properties: 
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref MyInternetGateway
+      RouteTableId: !Ref MyPrivateRouteTableC
+  MyPrivateRouteLAN:
+    Type: AWS::EC2::Route
+    Properties: 
+      DestinationCidrBlock: 172.16.0.0/24
+      InstanceId: !Ref MyEC2VPN
+      RouteTableId: !Ref MyPrivateRouteTableC
+
+
+  #####
+  ##### 'VPN' Security Group
+  #####
+  MyVPNSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for private network
+      SecurityGroupEgress: 
+        - IpProtocol: icmp
+          FromPort: -1
+          ToPort: -1
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0   
+        - IpProtocol: udp
+          FromPort: 53
+          ToPort: 53
+          CidrIp: 0.0.0.0/0                  
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: udp
+          FromPort: 500
+          ToPort: 500
+          CidrIp: 0.0.0.0/0 
+        - IpProtocol: udp
+          FromPort: 4500
+          ToPort: 4500
+          CidrIp: 0.0.0.0/0          
+      SecurityGroupIngress:
+        - IpProtocol: icmp
+          FromPort: -1
+          ToPort: -1
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0   
+        - IpProtocol: udp
+          FromPort: 53
+          ToPort: 53
+          CidrIp: 0.0.0.0/0                  
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0 
+        - IpProtocol: udp
+          FromPort: 500
+          ToPort: 500
+          CidrIp: 0.0.0.0/0 
+        - IpProtocol: udp
+          FromPort: 4500
+          ToPort: 4500
+          CidrIp: 0.0.0.0/0          
+      VpcId: !Ref MyVPC
+
+
+  #####
+  ##### 'VPN' Instance
+  #####
+  MyEC2VPN:
+    Type: 'AWS::EC2::Instance'
+    Properties:
+      AvailabilityZone: eu-west-3c
+      InstanceType: t2.micro
+      ImageId: ami-0c6ebbd55ab05f070
+      KeyName: MyKey
+      NetworkInterfaces:
+        - NetworkInterfaceId: !Ref MyNetworkInterfaceVPN
+          DeviceIndex: '0'  
+      SourceDestCheck: false
+      UserData:
+        "Fn::Base64":
+          !Sub |
+            #!/bin/bash
+
+            #####
+            ##### Variables List
+            #####
+            export AWS_PUB_IP=`curl ifconfig.me`
+            export MY_PUB_IP=78.210.155.59
+            #####
+            ##### Installations List
+            #####
+            sudo apt-get update && apt-get upgrade -y
+            sudo apt-get install openssh-client -y
+            sudo apt-get install strongswan -y
+            sudo systemctl start strongswan
+            sudo systemctl enable strongswan
+            sudo apt-get install iptables -y
+            sudo systemctl start iptables
+            sudo systemctl enable iptables
+            #####
+            ##### Network Routing
+            #####
+            cat >> /etc/sysctl.conf << EOF
+            net.ipv4.ip_forward = 1
+            net.ipv6.conf.all.forwarding=1
+            net.ipv4.conf.all.accept_redirects = 0
+            net.ipv4.conf.all.send_redirects = 0
+            EOF
+            sudo sysctl -p /etc/sysctl.conf
+            #####
+            ##### IPsec Configuration
+            #####
+            cat > /etc/ipsec.conf << EOF
+            config setup
+              charondebug="all"
+              uniqueids=yes
+              strictcrlpolicy=no
+            conn aws-to-lan
+              type=tunnel
+              authby=secret
+              left=%defaultroute
+              leftid=$AWS_PUB_IP
+              leftsubnet=10.0.5.0/24
+              right=$MY_PUB_IP
+              rightsubnet=172.16.0.0/24
+              auto=start
+              keyexchange=ikev1
+              ike=aes128-sha1-modp1024
+              ikelifetime=8h
+              esp=aes128-sha1-modp1024
+              lifetime=1h  
+            EOF
+            #####
+            ##### IPsec Key
+            #####
+            cat >> /etc/ipsec.secrets << EOF
+            $AWS_PUB_IP $MY_PUB_IP : PSK "3lZE0wWyLdz9DmYk5L0EncYsquQ2ZwQT1eHkT+M91sihXSbPATlIdx6mDAwz5Wf3jbbpndW5mHAxaNLo0UV1jg=="
+            EOF
+            #####
+            ##### Network Firewalling
+            #####
+            sudo iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+            sudo iptables -t nat -A POSTROUTING -o eth0 -m policy --dir out --pol ipsec -j ACCEPT
+            sudo iptables -t nat -I POSTROUTING -m policy --pol ipsec --dir out -j ACCEPT
+            #####
+            ##### IPsec Restart
+            #####
+            sudo ipsec restart
+
+
+  #####
+  ##### Intranet Security Group
+  #####
+  MyIntranetSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for private network
+      SecurityGroupEgress: 
+        - IpProtocol: icmp
+          FromPort: -1
+          ToPort: -1
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0   
+        - IpProtocol: udp
+          FromPort: 53
+          ToPort: 53
+          CidrIp: 0.0.0.0/0                  
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0     
+      SecurityGroupIngress:
+        - IpProtocol: icmp
+          FromPort: -1
+          ToPort: -1
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0   
+        - IpProtocol: udp
+          FromPort: 53
+          ToPort: 53
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      VpcId: !Ref MyVPC
+
+
+  #####
+  ##### Intranet Instance
+  #####
+  MyEC2Intranet:
+    Type: 'AWS::EC2::Instance'
+    DependsOn: MyEC2VPN
+    Properties: 
+      AvailabilityZone: eu-west-3c
+      InstanceType: t2.micro
+      ImageId: ami-0c6ebbd55ab05f070
+      KeyName: MyKey
+      NetworkInterfaces:
+        - NetworkInterfaceId: !Ref MyNetworkInterfaceIntranet
+          DeviceIndex: '0'
+      UserData:        
+        "Fn::Base64":          
+          !Sub |
+            #!/bin/bash
+
+            #####
+            ##### Installations List
+            #####
+            sudo apt-get update && apt-get upgrade -y
+            sudo apt-get install openssh-server -y
+            sudo apt-get install apache2 -y
+            #####
+            ##### SSH Configuration
+            #####
+            sudo chpasswd <<<"ubuntu:ubuntu"
+            sudo sed -i '58d' /etc/ssh/sshd_config
+            sudo echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config
+            sudo echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config
+            sudo service ssh restart
